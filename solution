@@ -1,0 +1,204 @@
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class FileFinder {
+    Map<String, FileSystem> files;
+    Map<String, SearchStrategy> strategies;
+    public FileFinder(){
+        this.files=new ConcurrentHashMap<>();
+        this.strategies=new ConcurrentHashMap<>();
+        strategies.put("1",new StrictlyLargerSearchStrategy());
+        strategies.put("2",new ExtensionMatchSearchStrategy());
+    }
+    public void addFile(String path, int sizeMb) {
+        files.put(path,new FileSystem(path,sizeMb));
+    }
+
+    public List<String> runQuery(List<String> rules, List<String> ops) {
+        int n=ops.size();
+        String leftRule=rules.get(0);
+        List<String> leftList=getFiles(leftRule);
+        for(int i=0;i<n;i++){
+            String operation=ops.get(i);
+            List<String> rightList=getFiles(rules.get(i+1));
+            Specification<String> sp1=new InListSpecification<>(leftList);
+            Specification<String> sp2=new InListSpecification<>(rightList);
+
+            Set<String> combinedSet = new LinkedHashSet<>(); // LinkedHashSet keeps order
+            combinedSet.addAll(leftList);
+            combinedSet.addAll(rightList);
+
+            // Convert back to a list if needed
+            List<String> combinelist = new ArrayList<>(combinedSet);
+
+            List<String> tmp=new ArrayList<>();
+            if(operation.equals("AND")){
+                Specification<String> combine = new AndSpecification<>(sp1,sp2);
+                for(String str: combinelist){
+                    if(combine.isSatisfiedBy(str)){
+                        tmp.add(str);
+                    }
+                }
+            }
+            else if(operation.equals("OR")){
+                Specification<String> combine = new OrSpecification<>(sp1,sp2);
+                for(String str: combinelist){
+                    if(combine.isSatisfiedBy(str)){
+                        tmp.add(str);
+                    }
+                }
+            }else{
+                Specification<String> combine = new AndNotSpecification<>(sp1,sp2);
+                for(String str: combinelist){
+                    if(combine.isSatisfiedBy(str)){
+                        tmp.add(str);
+                    }
+                }
+            }
+            leftList=tmp;
+        }
+        Collections.sort(leftList);
+        return leftList;
+    }
+    private List<String> getFiles(String rule){
+        String[] arr=rule.split(",");
+        List<String> res=strategies.get(arr[0]).search(arr[1],arr[2],files);
+        return res;
+    }
+
+}
+
+interface SearchStrategy {
+     List<String> search(String dirPath, String args, Map<String, FileSystem> files);
+}
+
+class StrictlyLargerSearchStrategy implements SearchStrategy{
+    @Override
+    public List<String> search(String dirPath, String args, Map<String, FileSystem> files) {
+        List<String> res=new ArrayList<>();
+        for(Map.Entry<String,FileSystem> me: files.entrySet()){
+            String key= me.getKey();
+            FileSystem val=me.getValue();
+            if(UnderDirectory.isUnderDirectory(key,dirPath) && val.getSizeMb()>Integer.parseInt(args)){
+                res.add(key);
+            }
+        }
+        Collections.sort(res);
+        return res;
+    }
+}
+
+class ExtensionMatchSearchStrategy implements SearchStrategy{
+    @Override
+    public List<String> search(String dirPath, String args, Map<String, FileSystem> files) {
+        List<String> res=new ArrayList<>();
+        for(Map.Entry<String,FileSystem> me: files.entrySet()){
+            String key= me.getKey();
+            if(UnderDirectory.isUnderDirectory(key,dirPath) && key.substring(key.length()-args.length()).equals(args)){
+                res.add(key);
+            }
+        }
+        Collections.sort(res);
+        return res;
+    }
+}
+
+interface Specification<T> {
+    boolean isSatisfiedBy(T term);
+}
+
+class OrSpecification<T> implements Specification<T> {
+    Specification<T> left;
+    Specification<T> right;
+
+    public OrSpecification(Specification<T> left,Specification<T> right){
+        this.left=left;
+        this.right=right;
+    }
+
+    @Override
+    public boolean isSatisfiedBy(T term) {
+        return left.isSatisfiedBy(term) || right.isSatisfiedBy(term);
+    }
+}
+
+class InListSpecification<T> implements Specification<T> {
+
+    private List<T> list;
+
+    public InListSpecification(List<T> list){
+        this.list=list;
+    }
+
+    @Override
+    public boolean isSatisfiedBy(T term) {
+        return this.list.contains(term);
+    }
+}
+
+
+class AndSpecification<T> implements Specification<T>{
+
+    Specification<T> left;
+    Specification<T> right;
+
+    public AndSpecification(Specification<T> left,Specification<T> right){
+        this.left=left;
+        this.right=right;
+    }
+
+    @Override
+    public boolean isSatisfiedBy(T term) {
+        return left.isSatisfiedBy(term) && right.isSatisfiedBy(term);
+    }
+}
+
+
+class AndNotSpecification<T> implements Specification<T> {
+    Specification<T> left;
+    Specification<T> right;
+
+    public AndNotSpecification(Specification<T> left,Specification<T> right){
+        this.left=left;
+        this.right=right;
+    }
+
+    @Override
+    public boolean isSatisfiedBy(T term) {
+        return left.isSatisfiedBy(term) && !right.isSatisfiedBy(term);
+    }
+}
+
+
+class UnderDirectory {
+    public static boolean isUnderDirectory(String filePath,String dirPath){
+         return  filePath.startsWith(dirPath) && filePath.contains(dirPath);
+    }
+}
+
+
+class FileSystem {
+    private String path;
+    private int sizeMb;
+
+    public FileSystem(String path, int sizeMb) {
+        this.path = path;
+        this.sizeMb = sizeMb;
+    }
+
+    public String getPath() {
+        return path;
+    }
+
+    public void setPath(String path) {
+        this.path = path;
+    }
+
+    public int getSizeMb() {
+        return sizeMb;
+    }
+
+    public void setSizeMb(int sizeMb) {
+        this.sizeMb = sizeMb;
+    }
+}
